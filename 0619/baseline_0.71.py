@@ -2,8 +2,6 @@ import pandas as pd
 import numpy as np
 import json
 
-# 读取数据
-
 # 训练集
 with open('../datasets/train/train.jsonl', 'r', encoding='utf-8') as f:
     train = [json.loads(line) for line in f.readlines()]
@@ -41,8 +39,7 @@ from sklearn.metrics import f1_score,accuracy_score
 from sklearn.model_selection import StratifiedKFold,KFold
 from sklearn.linear_model import SGDClassifier
 
-
-# 定义模型
+# 交叉验证
 def cross_validate_score(model, train_df, y, cv, test_df):
     val_scores = []
     test_preds = np.zeros((test_df.shape[0],))
