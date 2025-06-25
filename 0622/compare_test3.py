@@ -23,6 +23,43 @@ from sklearn.metrics import f1_score, accuracy_score, classification_report
 import warnings
 warnings.filterwarnings("ignore")
 
+# ========== GPU设备检测 ==========
+def check_gpu():
+    """检查GPU设备并打印信息"""
+    print("="*50)
+    print("GPU设备检测")
+    print("="*50)
+    
+    # 检查CUDA是否可用
+    try:
+        import cupy as cp
+        print(f"CuPy版本: {cp.__version__}")
+        print(f"CUDA可用: {cp.cuda.is_available()}")
+        if cp.cuda.is_available():
+            print(f"CUDA设备数量: {cp.cuda.runtime.getDeviceCount()}")
+            print(f"当前CUDA设备: {cp.cuda.runtime.getDevice()}")
+            print(f"设备名称: {cp.cuda.runtime.getDeviceProperties(cp.cuda.runtime.getDevice())['name']}")
+            print(f"GPU内存: {cp.cuda.runtime.getDeviceProperties(cp.cuda.runtime.getDevice())['totalGlobalMem'] / 1024**3:.2f} GB")
+        else:
+            print("CUDA不可用，将使用CPU")
+    except Exception as e:
+        print(f"GPU检测出错: {e}")
+    
+    # 检查cuDF
+    try:
+        print(f"cuDF版本: {cudf.__version__}")
+    except:
+        print("cuDF版本信息获取失败")
+    
+    # 检查cuML
+    try:
+        import cuml
+        print(f"cuML版本: {cuml.__version__}")
+    except:
+        print("cuML版本信息获取失败")
+    
+    print("="*50)
+
 # ========== 1. 数据读取与预处理 ==========
 def load_data():
     """Loads train and test data into cuDF DataFrames."""
@@ -45,36 +82,91 @@ def load_data():
 
 # ========== 2. 特征工程策略 ==========
 
-def get_text_stats(text_series_pd):
-    """Generates statistical features from a pandas Series of text."""
-    stats_list = []
-    for text in text_series_pd:
-        text = str(text)
-        words = text.split()
-        word_count = len(words)
-        length = len(text)
-        
-        if word_count == 0:
-            stats_list.append([0] * 9)
-            continue
-            
-        avg_word_len = np.mean([len(w) for w in words])
-        punct_count = len(re.findall(r'[.,!?;:]', text))
-        unique_word_ratio = len(set(words)) / word_count
-        avg_sent_len = np.mean([len(s.split()) for s in re.split(r'[.!?]', text) if s.strip()]) if text else 0
-        punct_ratio = punct_count / length
-        # 你可以继续在这里添加更高级的特征，如可读性分数等
-        
-        stats_list.append([
-            length, word_count, avg_word_len, punct_count, 
-            unique_word_ratio, avg_sent_len, punct_ratio
-        ])
-        
-    stat_names = [
-        'length', 'word_count', 'avg_word_len', 'punct_count',
-        'unique_word_ratio', 'avg_sent_len', 'punct_ratio'
-    ]
-    return cudf.DataFrame(stats_list, columns=stat_names)
+def get_text_stats_gpu(text_series):
+    """Generates statistical features using GPU acceleration with robust error handling."""
+    print("Computing text statistics on GPU with robust handling...")
+    
+    # 确保输入是字符串类型并处理缺失值
+    text_series = text_series.fillna('').astype('str')
+    
+    # 基础统计特征
+    length = text_series.str.len()
+    
+    # 计算单词数量 - 使用更稳定的方法
+    word_count = cudf.Series([0] * len(text_series))
+    for i in range(len(text_series)):
+        try:
+            text = str(text_series.iloc[i])
+            if text.strip():
+                word_count.iloc[i] = len(text.split())
+        except:
+            pass
+    
+    # 计算平均词长
+    avg_word_len = cudf.Series([0.0] * len(text_series))
+    for i in range(len(text_series)):
+        try:
+            text = str(text_series.iloc[i])
+            words = text.split()
+            if len(words) > 0:
+                total_chars = sum(len(word) for word in words)
+                avg_word_len.iloc[i] = total_chars / len(words)
+        except:
+            pass
+    
+    # 标点符号统计 - 使用字符计数而不是正则表达式
+    punct_count = cudf.Series([0] * len(text_series))
+    punct_chars = ['.', ',', '!', '?', ';', ':']
+    for i in range(len(text_series)):
+        try:
+            text = str(text_series.iloc[i])
+            for char in punct_chars:
+                punct_count.iloc[i] += text.count(char)
+        except:
+            pass
+    
+    # 唯一词比例
+    unique_word_ratio = cudf.Series([0.0] * len(text_series))
+    for i in range(len(text_series)):
+        try:
+            text = str(text_series.iloc[i])
+            words = text.split()
+            if len(words) > 0:
+                unique_ratio = len(set(words)) / len(words)
+                unique_word_ratio.iloc[i] = unique_ratio
+        except:
+            pass
+    
+    # 句子长度统计 - 简化为单词数/句子数
+    sentence_count = cudf.Series([1] * len(text_series))  # 默认至少1个句子
+    for i in range(len(text_series)):
+        try:
+            text = str(text_series.iloc[i])
+            # 计算句子结束符号的数量
+            sentence_ends = text.count('.') + text.count('!') + text.count('?')
+            sentence_count.iloc[i] = max(1, sentence_ends + 1)  # 至少1个句子
+        except:
+            pass
+    
+    avg_sent_len = word_count / sentence_count
+    avg_sent_len = avg_sent_len.fillna(0)
+    
+    # 比例特征
+    punct_ratio = punct_count / length
+    punct_ratio = punct_ratio.fillna(0)
+    
+    # 合并所有特征
+    stats_df = cudf.DataFrame({
+        'length': length,
+        'word_count': word_count,
+        'avg_word_len': avg_word_len,
+        'punct_count': punct_count,
+        'unique_word_ratio': unique_word_ratio,
+        'avg_sent_len': avg_sent_len,
+        'punct_ratio': punct_ratio
+    })
+    
+    return stats_df
 
 def feature_strategy_tfidf_only(df_all):
     """Strategy 1: TF-IDF features only."""
@@ -83,7 +175,7 @@ def feature_strategy_tfidf_only(df_all):
     tfidf_feat = vectorizer.fit_transform(df_all['text'])
     
     # Save vectorizer for inference
-    joblib.dump(vectorizer, 'tfidf_only_vectorizer.pkl')
+    joblib.dump(vectorizer, '0622/tfidf_only_vectorizer.pkl')
     
     return cudf.DataFrame(tfidf_feat.toarray(), columns=[f'tfidf_{i}' for i in range(tfidf_feat.shape[1])])
 
@@ -95,19 +187,20 @@ def feature_strategy_tfidf_and_scaled_stats(df_all):
     tfidf_feat = vectorizer.fit_transform(df_all['text'])
     tfidf_feat_df = cudf.DataFrame(tfidf_feat.toarray(), columns=[f'tfidf_{i}' for i in range(tfidf_feat.shape[1])])
     
-    # Stats
-    stats_feat = get_text_stats(df_all['text'].to_pandas())
+    # Stats - 使用GPU加速版本
+    stats_feat = get_text_stats_gpu(df_all['text'])
     
-    # Scale ALL features together
+    # Scale ALL features together using GPU
     all_unscaled_features = cudf.concat([tfidf_feat_df, stats_feat.reset_index(drop=True)], axis=1)
     
-    # IMPORTANT: Feature Scaling
+    # IMPORTANT: Feature Scaling on GPU
     scaler = StandardScaler()
     all_scaled_features = scaler.fit_transform(all_unscaled_features.astype(cp.float32))
     
     # Save vectorizer and scaler for inference
-    joblib.dump(vectorizer, 'tfidf_stats_vectorizer.pkl')
-    joblib.dump(scaler, 'tfidf_stats_scaler.pkl')
+    os.makedirs('0622', exist_ok=True)
+    joblib.dump(vectorizer, '0622/tfidf_stats_vectorizer.pkl')
+    joblib.dump(scaler, '0622/tfidf_stats_scaler.pkl')
 
     return cudf.DataFrame(all_scaled_features, columns=all_unscaled_features.columns)
 
@@ -137,40 +230,60 @@ def run_experiment(features_df, df_all, model, model_name):
     y = train_df['label']
     X_test = test_df[feats]
     
-    for fold, (train_idx, val_idx) in enumerate(skf.split(X, y.to_numpy())):
-        X_train, y_train = X.iloc[train_idx], y.iloc[train_idx]
-        X_val, y_val = X.iloc[val_idx], y.iloc[val_idx]
+    for fold, (train_idx, val_idx) in enumerate(skf.split(X.to_pandas(), y.to_pandas())):
+        # 使用GPU数组进行训练
+        X_train = X.iloc[train_idx].to_cupy()
+        y_train = y.iloc[train_idx].to_cupy()
+        X_val = X.iloc[val_idx].to_cupy()
+        y_val = y.iloc[val_idx].to_cupy()
         
-        # Fit model
+        # Fit model on GPU
         model.fit(X_train, y_train)
         
         # Predict on validation set
-        pred_val = model.predict(X_val).astype(cp.int32)
+        if hasattr(model, 'predict_proba'):
+            pred_val = model.predict_proba(X_val)[:, 1]
+            pred_val = (pred_val > 0.5).astype(cp.int32)
+        else:
+            pred_val = model.predict(X_val).astype(cp.int32)
+        
         oof_preds[val_idx] = pred_val
         
         # Predict on test set
-        test_preds += model.predict(X_test) / skf.n_splits
+        if hasattr(model, 'predict_proba'):
+            test_pred = model.predict_proba(X_test.to_cupy())[:, 1]
+        else:
+            test_pred = model.predict(X_test.to_cupy())
+        test_preds += test_pred / skf.n_splits
 
-        acc = accuracy_score(y_val.get(), pred_val.get())
+        # Convert to NumPy for sklearn metrics
+        y_val_np = cp.asnumpy(y_val)
+        pred_val_np = cp.asnumpy(pred_val)
+        acc = accuracy_score(y_val_np, pred_val_np)
         print(f"Fold {fold+1} Accuracy: {acc:.5f}")
 
     # Overall OOF (Out-of-Fold) evaluation
-    oof_acc = accuracy_score(y.get(), (oof_preds.get()))
-    oof_f1 = f1_score(y.get(), oof_preds.get(), average='weighted')
+    y_true_np = y.to_pandas().values
+    oof_preds_np = cp.asnumpy(oof_preds)
+    oof_acc = accuracy_score(y_true_np, oof_preds_np)
+    oof_f1 = f1_score(y_true_np, oof_preds_np, average='weighted')
     
     print("\n--- Overall OOF Performance ---")
     print(f"Accuracy: {oof_acc:.5f}")
     print(f"F1 Score (Weighted): {oof_f1:.5f}")
-    print(classification_report(y.get(), oof_preds.get()))
+    print(classification_report(y_true_np, oof_preds_np))
     
-    return oof_acc, oof_f1, test_preds.get()
+    return oof_acc, oof_f1, test_preds
 
 # ========== 4. 主执行流程 ==========
 
 if __name__ == '__main__':
+    # 检查GPU设备
+    check_gpu()
+    
     df_all = load_data()
 
-    # Define models to test
+    # Define models to test - 使用GPU加速的模型
     models = {
         "MBSGDClassifier": MBSGDClassifier(loss="log", penalty="l2", alpha=1e-4, epochs=1000, tol=1e-4, n_iter_no_change=10),
         "RandomForest": RandomForestClassifier(n_estimators=100, max_depth=16, random_state=42),
@@ -180,12 +293,13 @@ if __name__ == '__main__':
     # Define feature strategies to test
     feature_strategies = {
         "TF-IDF Only": feature_strategy_tfidf_only,
-        "TF-IDF + Scaled Stats": feature_strategy_tfidf_and_scaled_stats
+        #"TF-IDF + Scaled Stats": feature_strategy_tfidf_and_scaled_stats
     }
     
     results = []
 
     for f_name, f_func in feature_strategies.items():
+        print(f"\n{'='*20} {f_name} {'='*20}")
         features_df = f_func(df_all)
         
         # Test each model with the current feature set
@@ -204,11 +318,16 @@ if __name__ == '__main__':
                 "CV F1-Score": f1
             })
 
-            # Optionally, save submission file for this strategy
-            # submission_labels = (test_predictions > 0.5).astype(int)
-            # sub_df = pd.DataFrame({'label': submission_labels})
-            # sub_df.to_csv(f'submission_{f_name}_{m_name}.csv', index=False, header=False)
-
+            # Save submission file for this strategy
+            if hasattr(test_predictions, 'get'):
+                submission_labels = (test_predictions.get() > 0.5).astype(int)
+            else:
+                submission_labels = (test_predictions > 0.5).astype(int)
+            
+            os.makedirs('0622', exist_ok=True)
+            with open(f'0622/submission_{f_name.replace(" ", "_")}_{m_name}.txt', 'w') as f:
+                for label in submission_labels:
+                    f.write(f"{label}\n")
 
     # Print final comparison table
     print("\n\n" + "="*50)
@@ -216,3 +335,7 @@ if __name__ == '__main__':
     print("="*50)
     results_df = pd.DataFrame(results).sort_values(by="CV Accuracy", ascending=False)
     print(results_df.to_string(index=False))
+    
+    # Save results to file
+    results_df.to_csv('0622/comparison_results.csv', index=False)
+    print(f"\nResults saved to 0622/comparison_results.csv")

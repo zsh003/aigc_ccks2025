@@ -126,7 +126,8 @@ models['optuna_lgb'] = lgb.LGBMClassifier(**best_params).fit(X_train.to_pandas()
 
 # ========== 7. 可视化 & 结果保存 ==========
 res_df = pd.DataFrame(results, columns=['data','model','accuracy','f1'])
-res_df.to_csv('results_summary.csv', index=False)
+res_df.to_csv('0622/results_summary.csv', index=False)
+
 
 # 绘图：Accuracy & F1
 plt.figure()
