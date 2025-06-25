@@ -4,13 +4,15 @@
 conda create -n py311_torch python==3.11.12
 
 # for cuda 12.6 nvidia-smi
-pip install torch torchvision torchaudio --index-url ht
-tps://download.pytorch.org/whl/cu126
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
 
 pip install transformers -i https://pypi.tuna.tsinghua.edu.cn/simple
 ```
 
-## 也可以创建Rapids环境后再安装
+本项目使用的是Rapids环境，Rapids版本为25.04，Pytorch版本为2.7.1，CUDA版本为12.6.
+
+
+## 创建Rapids环境
 
 ### 1. 安装Miniconda
 清华源下载：https://mirrors.tuna.tsinghua.edu.cn/anaconda/miniconda/

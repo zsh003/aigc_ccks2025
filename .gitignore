@@ -1,4 +1,4 @@
-submit.txt
+
 *.log
 *.pkl
 __pycahce__/
@@ -6,5 +6,5 @@ __pycahce__/
 ref/
 *.model
 test/
-submission_*.txt
 .ipynb_checkpoints/
+*.pkl
