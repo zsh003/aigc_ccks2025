@@ -8,3 +8,6 @@ ref/
 test/
 .ipynb_checkpoints/
 *.pkl
+*.npy
+submit*.txt
+submission*.txt
