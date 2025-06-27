@@ -11,3 +11,4 @@ test/
 *.npy
 submit*.txt
 submission*.txt
+models/
