@@ -29,7 +29,8 @@ OUTPUT_DIR = '0627/results'
 MODELS_DIR = '0627/models'
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(MODELS_DIR, exist_ok=True)
-CV = KFold(n_splits=5, shuffle=True, random_state=2024)
+N_SPLITS = 2  # 交叉验证折数
+CV = KFold(n_splits=N_SPLITS, shuffle=True, random_state=2024)
 BERT_MODEL = 'bert-base-uncased'
 REPORT_TO = ['tensorboard']  # 可改为['wandb']或[]
 
@@ -77,7 +78,9 @@ def preprocess(texts, tokenizer, max_length=256):
 fold_oof = np.zeros(len(X))
 test_probs = np.zeros(len(test_texts))
 fold_metrics = []
+all_start = time.time()
 for fold, (train_idx, val_idx) in enumerate(CV.split(X, y)):
+    fold_start = time.time()
     print(f"\n{'='*10} Fold {fold+1} / {CV.get_n_splits()} {'='*10}")
     # 显存清理与加速
     torch.cuda.empty_cache()
@@ -144,7 +147,7 @@ for fold, (train_idx, val_idx) in enumerate(CV.split(X, y)):
             report_to=REPORT_TO,
             disable_tqdm=True,
             bf16=True if torch.cuda.is_available() else False,  # 优先使用bfloat16
-            fp16=True if torch.cuda.is_available() else False,
+            #fp16=True if not torch.cuda.is_available() else False,
             tf32=True if torch.cuda.is_available() else False, # 启用TF32加速
             gradient_checkpointing=True, # 启用检查点节省显存
             optim="adamw_torch",
@@ -184,6 +187,8 @@ for fold, (train_idx, val_idx) in enumerate(CV.split(X, y)):
     del model
     torch.cuda.empty_cache()
     gc.collect()
+    fold_end = time.time()
+    print(f"Fold{fold} 总用时: {fold_end - fold_start:.2f} 秒")
 # 保存概率
 save_probs(fold_oof, test_probs, OUTPUT_DIR, prefix="bert")
 # 评估整体
@@ -221,4 +226,6 @@ if os.path.exists(old_path):
     plt.savefig(os.path.join(OUTPUT_DIR, 'bert_vs_0626_f1.png'))
     plt.close()
     print('BERT与0626模型F1对比图已保存')
-print("\n全部流程完成。") 
+all_end = time.time()
+print(f"\n全部流程总用时: {all_end - all_start:.2f} 秒")
+print("\n如需可视化训练过程，请在终端运行: tensorboard --logdir 0627/models/ ，然后浏览器访问 http://localhost:6006") 
