@@ -12,3 +12,6 @@ test/
 submit*.txt
 submission*.txt
 models/
+fine_tuned_model/
+*.zip
+*.rar
