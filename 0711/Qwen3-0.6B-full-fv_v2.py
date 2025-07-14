@@ -9,21 +9,23 @@ from torch.utils.data import Dataset, DataLoader
 from transformers.training_args import TrainingArguments
 from transformers.trainer import Trainer
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from transformers.trainer_callback import EarlyStoppingCallback
-from peft import get_peft_model, LoraConfig, TaskType, PeftModel
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 
 # 设置环境变量解决CUDA多进程问题
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
+# 添加内存管理相关的环境变量
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+
 # 定义路径
-MODEL_NAME = "/mnt/e/Models/Qwen/Qwen3/Qwen3-1.7B"
+MODEL_NAME = "/mnt/e/Models/Qwen/Qwen3/Qwen3-0.6B"
 TRAIN_PATH = "../datasets/train/train.jsonl"
 TEST_PATH = "../datasets/test_521/test.jsonl"
-OUTPUT_DIR = "0707/fine_tuned_model"
-RESULT_PATH = "0707/submit.txt"
-CHECKPOINT_DIR = "0707/checkpoints"
+OUTPUT_DIR = "0711/fine_tuned_model_0.6B_full-fv_v2"
+RESULT_PATH = "0711/submit_0.6B_full-fv_v2.txt"
+CHECKPOINT_DIR = "0711/checkpoints_0.6B_full-fv_v2"
 
 # 创建必要的目录
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -37,6 +39,49 @@ os.makedirs(HF_CACHE_DIR, exist_ok=True)
 DATASETS_CACHE = os.path.join(os.path.dirname(HF_CACHE_DIR), "datasets")
 os.environ["DATASETS_CACHE"] = DATASETS_CACHE
 os.makedirs(DATASETS_CACHE, exist_ok=True)
+
+# 添加内存清理函数
+def cleanup_memory():
+    """强制清理内存和显存"""
+    print("执行内存清理...")
+    
+    # 清理PyTorch缓存
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+    
+    # 强制垃圾回收
+    gc.collect()
+    
+    print("内存清理完成")
+
+def safe_trainer_cleanup(trainer):
+    """安全清理Trainer对象"""
+    try:
+        if hasattr(trainer, 'train_dataloader'):
+            # 关闭数据加载器
+            if hasattr(trainer.train_dataloader, 'dataset'):
+                del trainer.train_dataloader.dataset
+            if hasattr(trainer.train_dataloader, 'sampler'):
+                del trainer.train_dataloader.sampler
+            del trainer.train_dataloader
+        
+        # 清理模型
+        if hasattr(trainer, 'model'):
+            del trainer.model
+        
+        # 清理优化器
+        if hasattr(trainer, 'optimizer'):
+            del trainer.optimizer
+        
+        # 清理调度器
+        if hasattr(trainer, 'lr_scheduler'):
+            del trainer.lr_scheduler
+        
+        del trainer
+        print("Trainer对象已安全清理")
+    except Exception as e:
+        print(f"清理Trainer时出错: {e}")
 
 # 检查GPU
 def check_gpu():
@@ -94,7 +139,6 @@ class AIGCDetectionDataset(Dataset):
             labels = torch.ones_like(input_ids) * -100
             
             # 找到input_ids中assistant回答的起始位置
-            # 更精确地定位assistant回答的开始位置
             prompt_tokens = self.tokenizer(full_prompt[:assistant_start], add_special_tokens=False)
             assistant_start_idx = len(prompt_tokens.input_ids)
             
@@ -130,7 +174,7 @@ def compute_metrics(eval_pred):
         "f1": f1
     }
 
-def predict_test_data(model, tokenizer, test_data, batch_size=8):
+def predict_test_data(model, tokenizer, test_data, batch_size=16):
     """批量预测以提高速度"""
     predictions = []
     device = model.device
@@ -217,33 +261,13 @@ def is_model_saved(model_dir):
     if not os.path.exists(model_dir):
         return False
     
-    # 检查LoRA适配器文件
-    adapter_config_exists = os.path.exists(os.path.join(model_dir, 'adapter_config.json'))
-    adapter_model_exists = os.path.exists(os.path.join(model_dir, 'adapter_model.safetensors'))
-    
-    # 检查目录是否为空
-    if os.path.exists(model_dir):
-        files = os.listdir(model_dir)
-        if len(files) == 0:
-            print(f"目录为空: {model_dir}")
-            return False
-    
-    # 检查是否有有效的LoRA适配器文件
-    if adapter_config_exists and adapter_model_exists:
-        # 检查adapter_model.safetensors文件大小
-        adapter_model_path = os.path.join(model_dir, 'adapter_model.safetensors')
-        if check_model_file_size(adapter_model_path):
-            print(f"检测到有效LoRA适配器: {model_dir}")
-            print(f"  - adapter_config.json: {adapter_config_exists}")
-            print(f"  - adapter_model.safetensors: {adapter_model_exists}")
-            return True
-        else:
-            print(f"LoRA适配器文件无效: {adapter_model_path}")
-            return False
+    # 检查pytorch_model.bin文件
+    model_file = os.path.join(model_dir, 'pytorch_model.bin')
+    if os.path.exists(model_file) and check_model_file_size(model_file):
+        print(f"检测到已保存的全量模型: {model_dir}")
+        return True
     else:
-        print(f"目录存在但缺少LoRA适配器文件: {model_dir}")
-        print(f"  - adapter_config.json: {adapter_config_exists}")
-        print(f"  - adapter_model.safetensors: {adapter_model_exists}")
+        print(f"未检测到全量模型: {model_dir}")
         return False
 
 def main():
@@ -272,144 +296,117 @@ def main():
     
     # 检查是否已有训练好的模型
     if is_model_saved(OUTPUT_DIR):
-        print(f"检测到已保存的LoRA适配器，直接加载进行预测: {OUTPUT_DIR}")
-        
-        # 验证LoRA适配器完整性
-        try:
-            # 加载基础模型
-            print(f"加载基础模型: {MODEL_NAME}")
-            base_model = AutoModelForCausalLM.from_pretrained(
-                MODEL_NAME,
-                torch_dtype=torch.float16,
-                device_map=None
-            )
-            
-            # 加载LoRA适配器
-            print(f"加载LoRA适配器: {OUTPUT_DIR}")
-            model = PeftModel.from_pretrained(base_model, OUTPUT_DIR)
-            print("✓ LoRA适配器加载成功")
-            
-            # 清理测试加载的模型
-            del base_model
-            torch.cuda.empty_cache()
-            
-        except Exception as e:
-            print(f"LoRA适配器验证失败: {e}")
-            print("将重新训练模型...")
-            # 如果验证失败，删除不完整的适配器文件
-            import shutil
-            if os.path.exists(OUTPUT_DIR):
-                shutil.rmtree(OUTPUT_DIR)
-                print(f"已删除不完整的适配器目录: {OUTPUT_DIR}")
-        
-        # 使用已加载的模型进行预测
-        print("使用已加载的模型进行预测...")
+        print(f"检测到已保存的全量模型，直接加载进行预测: {OUTPUT_DIR}")
+        # 加载模型和分词器
         tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-        
-        # 将模型移至GPU（如果可用）
+        model = AutoModelForCausalLM.from_pretrained(OUTPUT_DIR, torch_dtype=torch.float16, device_map=None)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model = model.to(device)
-        
+        print("✓ 全量模型加载成功")
         # 预测测试集
         print("预测测试集...")
-        predictions = predict_test_data(model, tokenizer, test_df, batch_size=8)
-        
+        predictions = predict_test_data(model, tokenizer, test_df, batch_size=16)
         # 保存预测结果
         print("保存预测结果...")
         with open(RESULT_PATH, "w") as file:
             for label in predictions:
                 file.write(str(label) + "\n")
-        
         print(f"预测结果已保存至 {RESULT_PATH}")
         return
     
     # 加载模型和分词器
     print("加载模型和分词器...")
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    # 加载基础模型 - 全参数微调
+    print("加载基础模型进行全参数微调...")
+    use_bf16 = False
+    use_fp16 = False
+    try:
+        # 检查BF16支持情况
+        if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+            print("使用BF16精度加载模型...")
+            model = AutoModelForCausalLM.from_pretrained(
+                MODEL_NAME, torch_dtype=torch.bfloat16, device_map=None
+            )
+            use_bf16 = True
+        else:
+            print("使用FP16精度加载模型...")
+            model = AutoModelForCausalLM.from_pretrained(
+                MODEL_NAME, torch_dtype=torch.float16, device_map=None
+            )
+            use_fp16 = True
+        print("✓ 模型加载成功")
+    except Exception as e:
+        print(f"模型加载失败: {e}")
+        print("尝试使用trust_remote_code=True...")
+        try:
+            if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+                model = AutoModelForCausalLM.from_pretrained(
+                    MODEL_NAME, torch_dtype=torch.bfloat16, device_map=None, trust_remote_code=True
+                )
+                use_bf16 = True
+            else:
+                model = AutoModelForCausalLM.from_pretrained(
+                    MODEL_NAME, torch_dtype=torch.float16, device_map=None, trust_remote_code=True
+                )
+                use_fp16 = True
+            print("✓ 模型加载成功")
+        except Exception as e2:
+            print(f"第二次尝试失败: {e2}")
+            print("尝试使用默认精度...")
+            model = AutoModelForCausalLM.from_pretrained(
+                MODEL_NAME, device_map=None, trust_remote_code=True
+            )
+            print("✓ 模型加载成功")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = model.to(device)
+    print("✓ 全量模型加载成功")
     
     # 创建训练数据集
     train_dataset = AIGCDetectionDataset(train_df, tokenizer)
     
-    # 加载基础模型
-    print("加载基础模型...")
-    model = AutoModelForCausalLM.from_pretrained(
-        MODEL_NAME,
-        torch_dtype=torch.float16,
-        device_map=None
-    )
-    
-    # 确保模型参数可训练
-    for param in model.parameters():
-        param.requires_grad = False
-    
-    # 应用LoRA配置
-    peft_config = LoraConfig(
-        task_type=TaskType.CAUSAL_LM,
-        inference_mode=False,
-        r=16,  # 增加rank
-        lora_alpha=32,
-        lora_dropout=0.1,
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],  # 扩展目标模块
-        bias="none",  # 不训练bias
-        use_rslora=False,
-    )
-    
-    model = get_peft_model(model, peft_config)
-    
-    # 将模型移到GPU
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = model.to(device)
-    
-    # 打印可训练参数信息
-    model.print_trainable_parameters()
-    
-    # 设置训练参数（针对RTX4060 8GB优化）
+    # 设置训练参数
     training_args = TrainingArguments(
         output_dir=CHECKPOINT_DIR,
         num_train_epochs=1,
-        per_device_train_batch_size=4,
-        per_device_eval_batch_size=4,
-        gradient_accumulation_steps=16,  # 增加梯度累积步数
+        per_device_train_batch_size=1,
+        per_device_eval_batch_size=1,
+        gradient_accumulation_steps=16,
         learning_rate=2e-5,
         weight_decay=0.01,
-        max_grad_norm=1.0,  # 添加梯度裁剪
-        warmup_steps=50,    # 引入学习率预热
+        max_grad_norm=1.0,
+        warmup_steps=50,
         save_strategy="steps",
-        save_steps=500,     # 每500步保存一次
-        save_total_limit=3, # 保留3个检查点
-        logging_steps=100,
+        save_steps=200,
+        save_total_limit=3,
+        logging_steps=50,
         remove_unused_columns=False,
         no_cuda=False,
         label_names=["labels"],
-        # GPU加速设置
-        fp16=True if torch.cuda.is_available() else False,
+        fp16=use_fp16,
+        bf16=use_bf16,
         tf32=True if torch.cuda.is_available() else False,
-        gradient_checkpointing=False,  # 暂时禁用梯度检查点
         optim="adamw_torch",
-        dataloader_pin_memory=False,  # 禁用pin_memory避免CUDA张量问题
-        dataloader_num_workers=4,        # 多进程数据加载
-        eval_accumulation_steps=2,   # 减少评估时的内存占用
-        report_to=[],  # 禁用wandb等报告工具
-        disable_tqdm=False,  # 启用进度条
+        dataloader_pin_memory=True,
+        gradient_checkpointing=False,
+        dataloader_num_workers=16,
+        dataloader_prefetch_factor=2,
+        eval_accumulation_steps=2,
+        report_to=[],
+        disable_tqdm=False,
+        group_by_length=True,
+        length_column_name="length",
+        ignore_data_skip=False,
+        dataloader_drop_last=True,
     )
     
-    # 创建Trainer
     def collate_fn(data):
-        """自定义数据收集函数，确保数据在正确设备上"""
         batch = {
             'input_ids': torch.stack([x['input_ids'] for x in data]),
             'attention_mask': torch.stack([x['attention_mask'] for x in data]),
             'labels': torch.stack([x['labels'] for x in data])
         }
-        # 确保数据在CPU上，让Trainer自动处理GPU转移
         return batch
-    
-    # 检查设备设置
-    print(f"当前设备: {device}")
-    print(f"CUDA可用: {torch.cuda.is_available()}")
-    if torch.cuda.is_available():
-        print(f"当前CUDA设备: {torch.cuda.current_device()}")
-        print(f"GPU名称: {torch.cuda.get_device_name()}")
     
     trainer = Trainer(
         model=model,
@@ -418,77 +415,84 @@ def main():
         data_collator=collate_fn
     )
     
-    # 调试信息：检查模型参数
     print("\n=== 模型调试信息 ===")
     print(f"模型设备: {next(model.parameters()).device}")
     print(f"可训练参数数量: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
     print(f"总参数数量: {sum(p.numel() for p in model.parameters())}")
-    
-    # 检查第一个样本
     sample = train_dataset[0]
     print(f"样本键: {sample.keys()}")
     print(f"input_ids形状: {sample['input_ids'].shape}")
     print(f"labels形状: {sample['labels'].shape}")
     print(f"labels中非-100的数量: {(sample['labels'] != -100).sum()}")
-    
-    # 检查模型输出
     model.eval()
     with torch.no_grad():
-        # 将样本数据移到与模型相同的设备
         sample_input = {k: v.unsqueeze(0).to(device) for k, v in sample.items()}
         outputs = model(**sample_input)
         print(f"模型输出logits形状: {outputs.logits.shape}")
-    
     print("=== 调试信息结束 ===\n")
     
-    # 开始训练
     print("开始训练模型...")
     print(f"训练参数: batch_size={training_args.per_device_train_batch_size}, "
           f"gradient_accumulation_steps={training_args.gradient_accumulation_steps}, "
           f"effective_batch_size={training_args.per_device_train_batch_size * training_args.gradient_accumulation_steps}")
-    
     try:
         trainer.train()
         print("训练完成！")
     except KeyboardInterrupt:
-        print("训练被中断，保存当前检查点...")
+        print("训练被中断，正在清理资源...")
+        cleanup_memory()
         trainer.save_model(os.path.join(CHECKPOINT_DIR, "interrupted"))
         print("检查点已保存，可以稍后继续训练")
+        safe_trainer_cleanup(trainer)
+        import multiprocessing
+        try:
+            multiprocessing.active_children()
+            for p in multiprocessing.active_children():
+                print(f"终止子进程: {p.pid}")
+                p.terminate()
+        except Exception as e:
+            print(f"终止子进程时出错: {e}")
         return
     except Exception as e:
         print(f"训练过程中出现错误: {e}")
-        print("保存当前检查点...")
+        print("正在清理资源...")
+        cleanup_memory()
         trainer.save_model(os.path.join(CHECKPOINT_DIR, "error"))
+        safe_trainer_cleanup(trainer)
+        import multiprocessing
+        try:
+            multiprocessing.active_children()
+            for p in multiprocessing.active_children():
+                print(f"终止子进程: {p.pid}")
+                p.terminate()
+        except Exception as e:
+            print(f"终止子进程时出错: {e}")
         return
-    
-    # 保存最终模型
     print("保存最终模型...")
     trainer.save_model(OUTPUT_DIR)
-    
-    # 清理内存
-    del trainer
+    print("清理训练资源...")
+    safe_trainer_cleanup(trainer)
     torch.cuda.empty_cache()
     gc.collect()
-    
-    # 使用已加载的模型进行预测
+    import multiprocessing
+    try:
+        multiprocessing.active_children()
+        for p in multiprocessing.active_children():
+            print(f"终止子进程: {p.pid}")
+            p.terminate()
+    except Exception as e:
+        print(f"终止子进程时出错: {e}")
     print("使用已加载的模型进行预测...")
-    # 模型已经在前面加载过了，直接使用
-    model = model.to(device)  # 确保模型在正确的设备上
-    
-    # 预测测试集
+    model = model.to(device)
     print("预测测试集...")
-    predictions = predict_test_data(model, tokenizer, test_df, batch_size=8)
-    
-    # 保存预测结果
+    predictions = predict_test_data(model, tokenizer, test_df, batch_size=32)
     print("保存预测结果...")
     with open(RESULT_PATH, "w") as file:
         for label in predictions:
             file.write(str(label) + "\n")
-    
     print(f"预测结果已保存至 {RESULT_PATH}")
-    
     all_end = time.time()
     print(f"\n全部流程总用时: {all_end - all_start:.2f} 秒")
 
 if __name__ == "__main__":
-    main()
+    main() 

@@ -17,13 +17,17 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
+# 添加内存管理相关的环境变量
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+
 # 定义路径
-MODEL_NAME = "/mnt/e/Models/Qwen/Qwen3/Qwen3-1.7B"
+MODEL_NAME = "/mnt/e/Models/Qwen/Qwen3/Qwen3-0.6B"
 TRAIN_PATH = "../datasets/train/train.jsonl"
 TEST_PATH = "../datasets/test_521/test.jsonl"
-OUTPUT_DIR = "0707/fine_tuned_model"
-RESULT_PATH = "0707/submit.txt"
-CHECKPOINT_DIR = "0707/checkpoints"
+OUTPUT_DIR = "0708/fine_tuned_model_0.6B_v3"
+RESULT_PATH = "0708/submit_0.6B_v3.txt"
+CHECKPOINT_DIR = "0708/checkpoints_0.6B_v3"
 
 # 创建必要的目录
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -37,6 +41,49 @@ os.makedirs(HF_CACHE_DIR, exist_ok=True)
 DATASETS_CACHE = os.path.join(os.path.dirname(HF_CACHE_DIR), "datasets")
 os.environ["DATASETS_CACHE"] = DATASETS_CACHE
 os.makedirs(DATASETS_CACHE, exist_ok=True)
+
+# 添加内存清理函数
+def cleanup_memory():
+    """强制清理内存和显存"""
+    print("执行内存清理...")
+    
+    # 清理PyTorch缓存
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+    
+    # 强制垃圾回收
+    gc.collect()
+    
+    print("内存清理完成")
+
+def safe_trainer_cleanup(trainer):
+    """安全清理Trainer对象"""
+    try:
+        if hasattr(trainer, 'train_dataloader'):
+            # 关闭数据加载器
+            if hasattr(trainer.train_dataloader, 'dataset'):
+                del trainer.train_dataloader.dataset
+            if hasattr(trainer.train_dataloader, 'sampler'):
+                del trainer.train_dataloader.sampler
+            del trainer.train_dataloader
+        
+        # 清理模型
+        if hasattr(trainer, 'model'):
+            del trainer.model
+        
+        # 清理优化器
+        if hasattr(trainer, 'optimizer'):
+            del trainer.optimizer
+        
+        # 清理调度器
+        if hasattr(trainer, 'lr_scheduler'):
+            del trainer.lr_scheduler
+        
+        del trainer
+        print("Trainer对象已安全清理")
+    except Exception as e:
+        print(f"清理Trainer时出错: {e}")
 
 # 检查GPU
 def check_gpu():
@@ -130,7 +177,7 @@ def compute_metrics(eval_pred):
         "f1": f1
     }
 
-def predict_test_data(model, tokenizer, test_data, batch_size=8):
+def predict_test_data(model, tokenizer, test_data, batch_size=16):
     """批量预测以提高速度"""
     predictions = []
     device = model.device
@@ -312,7 +359,7 @@ def main():
         
         # 预测测试集
         print("预测测试集...")
-        predictions = predict_test_data(model, tokenizer, test_df, batch_size=8)
+        predictions = predict_test_data(model, tokenizer, test_df, batch_size=16)
         
         # 保存预测结果
         print("保存预测结果...")
@@ -350,7 +397,7 @@ def main():
         lora_alpha=32,
         lora_dropout=0.1,
         target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],  # 扩展目标模块
-        bias="none",  # 不训练bias
+        bias="none",      # 不训练bias
         use_rslora=False,
     )
     
@@ -367,30 +414,37 @@ def main():
     training_args = TrainingArguments(
         output_dir=CHECKPOINT_DIR,
         num_train_epochs=1,
-        per_device_train_batch_size=4,
-        per_device_eval_batch_size=4,
+        per_device_train_batch_size=2,
+        per_device_eval_batch_size=2,
         gradient_accumulation_steps=16,  # 增加梯度累积步数
-        learning_rate=2e-5,
+        learning_rate=2e-5,  # 提高学习率 2e-5 -> 3e-4 -> 2e-5
         weight_decay=0.01,
         max_grad_norm=1.0,  # 添加梯度裁剪
-        warmup_steps=50,    # 引入学习率预热
+        warmup_steps=50,  # 减少预热步数 100->50 
         save_strategy="steps",
-        save_steps=500,     # 每500步保存一次
+        save_steps=200,     # 每200步保存一次
         save_total_limit=3, # 保留3个检查点
-        logging_steps=100,
+        logging_steps=50,
         remove_unused_columns=False,
         no_cuda=False,
         label_names=["labels"],
         # GPU加速设置
         fp16=True if torch.cuda.is_available() else False,
         tf32=True if torch.cuda.is_available() else False,
-        gradient_checkpointing=False,  # 暂时禁用梯度检查点
         optim="adamw_torch",
-        dataloader_pin_memory=False,  # 禁用pin_memory避免CUDA张量问题
-        dataloader_num_workers=4,        # 多进程数据加载
+        # gradient_checkpointing=True,  # 启用梯度检查点节省显存
+        dataloader_pin_memory=True,  # 启用pin_memory
+        #dataloader_pin_memory=False,  # 禁用pin_memory避免CUDA张量问题
+        gradient_checkpointing=False,  # 暂时禁用梯度检查点
+        dataloader_num_workers=8,     # 启用多进程数据加载
+        dataloader_prefetch_factor=2,  # 预取因子
         eval_accumulation_steps=2,   # 减少评估时的内存占用
         report_to=[],  # 禁用wandb等报告工具
         disable_tqdm=False,  # 启用进度条
+        group_by_length=True,  # 按长度分组提高效率
+        length_column_name="length",
+        ignore_data_skip=False,
+        dataloader_drop_last=True,  # 丢弃不完整的batch
     )
     
     # 创建Trainer
@@ -451,14 +505,36 @@ def main():
         trainer.train()
         print("训练完成！")
     except KeyboardInterrupt:
-        print("训练被中断，保存当前检查点...")
+        print("训练被中断，正在清理资源...")
+        cleanup_memory()
         trainer.save_model(os.path.join(CHECKPOINT_DIR, "interrupted"))
         print("检查点已保存，可以稍后继续训练")
+        safe_trainer_cleanup(trainer)
+        # 新增：尝试终止所有子进程，防止多进程残留
+        import multiprocessing
+        try:
+            multiprocessing.active_children()
+            for p in multiprocessing.active_children():
+                print(f"终止子进程: {p.pid}")
+                p.terminate()
+        except Exception as e:
+            print(f"终止子进程时出错: {e}")
         return
     except Exception as e:
         print(f"训练过程中出现错误: {e}")
-        print("保存当前检查点...")
+        print("正在清理资源...")
+        cleanup_memory()
         trainer.save_model(os.path.join(CHECKPOINT_DIR, "error"))
+        safe_trainer_cleanup(trainer)
+        # 新增：尝试终止所有子进程，防止多进程残留
+        import multiprocessing
+        try:
+            multiprocessing.active_children()
+            for p in multiprocessing.active_children():
+                print(f"终止子进程: {p.pid}")
+                p.terminate()
+        except Exception as e:
+            print(f"终止子进程时出错: {e}")
         return
     
     # 保存最终模型
@@ -466,10 +542,20 @@ def main():
     trainer.save_model(OUTPUT_DIR)
     
     # 清理内存
-    del trainer
+    print("清理训练资源...")
+    safe_trainer_cleanup(trainer)
     torch.cuda.empty_cache()
     gc.collect()
-    
+    # 新增：训练结束后尝试终止所有子进程
+    import multiprocessing
+    try:
+        multiprocessing.active_children()
+        for p in multiprocessing.active_children():
+            print(f"终止子进程: {p.pid}")
+            p.terminate()
+    except Exception as e:
+        print(f"终止子进程时出错: {e}")
+
     # 使用已加载的模型进行预测
     print("使用已加载的模型进行预测...")
     # 模型已经在前面加载过了，直接使用
@@ -477,7 +563,7 @@ def main():
     
     # 预测测试集
     print("预测测试集...")
-    predictions = predict_test_data(model, tokenizer, test_df, batch_size=8)
+    predictions = predict_test_data(model, tokenizer, test_df, batch_size=16)
     
     # 保存预测结果
     print("保存预测结果...")

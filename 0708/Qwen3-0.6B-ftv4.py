@@ -5,29 +5,47 @@ import numpy as np
 import torch
 import gc
 import time
+import logging
 from torch.utils.data import Dataset, DataLoader
 from transformers.training_args import TrainingArguments
 from transformers.trainer import Trainer
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from transformers.trainer_callback import EarlyStoppingCallback
+from transformers.trainer_callback import EarlyStoppingCallback, TrainerCallback
 from peft import get_peft_model, LoraConfig, TaskType, PeftModel
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+from sklearn.model_selection import train_test_split
 
 # 设置环境变量解决CUDA多进程问题
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
+# 添加内存管理相关的环境变量
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+
 # 定义路径
-MODEL_NAME = "/mnt/e/Models/Qwen/Qwen3/Qwen3-1.7B"
+MODEL_NAME = "/mnt/e/Models/Qwen/Qwen3/Qwen3-0.6B"
 TRAIN_PATH = "../datasets/train/train.jsonl"
 TEST_PATH = "../datasets/test_521/test.jsonl"
-OUTPUT_DIR = "0707/fine_tuned_model"
-RESULT_PATH = "0707/submit.txt"
-CHECKPOINT_DIR = "0707/checkpoints"
+OUTPUT_DIR = "0708/fine_tuned_model_0.6B_v4"
+RESULT_PATH = "0708/submit_0.6B_v4.txt"
+CHECKPOINT_DIR = "0708/checkpoints_0.6B_v4"
+LOG_PATH = "0708/training_log_v4.txt"
 
 # 创建必要的目录
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+
+# 设置日志记录
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(LOG_PATH, encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # ====== HF缓存配置 ======
 HF_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".hf_cache", "hub")
@@ -38,14 +56,57 @@ DATASETS_CACHE = os.path.join(os.path.dirname(HF_CACHE_DIR), "datasets")
 os.environ["DATASETS_CACHE"] = DATASETS_CACHE
 os.makedirs(DATASETS_CACHE, exist_ok=True)
 
+# 添加内存清理函数
+def cleanup_memory():
+    """强制清理内存和显存"""
+    logger.info("执行内存清理...")
+    
+    # 清理PyTorch缓存
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+    
+    # 强制垃圾回收
+    gc.collect()
+    
+    logger.info("内存清理完成")
+
+def safe_trainer_cleanup(trainer):
+    """安全清理Trainer对象"""
+    try:
+        if hasattr(trainer, 'train_dataloader'):
+            # 关闭数据加载器
+            if hasattr(trainer.train_dataloader, 'dataset'):
+                del trainer.train_dataloader.dataset
+            if hasattr(trainer.train_dataloader, 'sampler'):
+                del trainer.train_dataloader.sampler
+            del trainer.train_dataloader
+        
+        # 清理模型
+        if hasattr(trainer, 'model'):
+            del trainer.model
+        
+        # 清理优化器
+        if hasattr(trainer, 'optimizer'):
+            del trainer.optimizer
+        
+        # 清理调度器
+        if hasattr(trainer, 'lr_scheduler'):
+            del trainer.lr_scheduler
+        
+        del trainer
+        logger.info("Trainer对象已安全清理")
+    except Exception as e:
+        logger.error(f"清理Trainer时出错: {e}")
+
 # 检查GPU
 def check_gpu():
     if torch.cuda.is_available():
-        print(f"GPU可用: {torch.cuda.get_device_name()}")
-        print(f"GPU显存: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
-        print(f"当前显存使用: {torch.cuda.memory_allocated() / 1024**3:.1f} GB")
+        logger.info(f"GPU可用: {torch.cuda.get_device_name()}")
+        logger.info(f"GPU显存: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
+        logger.info(f"当前显存使用: {torch.cuda.memory_allocated() / 1024**3:.1f} GB")
     else:
-        print("GPU不可用，使用CPU")
+        logger.info("GPU不可用，使用CPU")
 
 # 定义数据集类
 class AIGCDetectionDataset(Dataset):
@@ -130,7 +191,7 @@ def compute_metrics(eval_pred):
         "f1": f1
     }
 
-def predict_test_data(model, tokenizer, test_data, batch_size=8):
+def predict_test_data(model, tokenizer, test_data, batch_size=16):
     """批量预测以提高速度"""
     predictions = []
     device = model.device
@@ -172,8 +233,8 @@ def predict_test_data(model, tokenizer, test_data, batch_size=8):
             
             # 调试信息（前几个样本）
             if i < 50:  # 只显示前50个样本的调试信息
-                print(f"样本 {i+1}: 输入长度={input_length}, 输出长度={len(outputs[0])}")
-                print(f"  输出文本: '{output_text}'")
+                logger.info(f"样本 {i+1}: 输入长度={input_length}, 输出长度={len(outputs[0])}")
+                logger.info(f"  输出文本: '{output_text}'")
             
             # 检查输出中是否包含"AI生成"或"人类撰写"
             if "AI生成" in output_text:
@@ -195,7 +256,7 @@ def predict_test_data(model, tokenizer, test_data, batch_size=8):
         
         # 显示进度
         if (i + batch_size) % 100 == 0 or (i + batch_size) >= len(test_data):
-            print(f"预测进度: {min(i + batch_size, len(test_data))}/{len(test_data)}")
+            logger.info(f"预测进度: {min(i + batch_size, len(test_data))}/{len(test_data)}")
     
     return predictions
 
@@ -246,6 +307,52 @@ def is_model_saved(model_dir):
         print(f"  - adapter_model.safetensors: {adapter_model_exists}")
         return False
 
+# 添加自定义回调类来记录训练参数
+class TrainingLoggerCallback(TrainerCallback):
+    """自定义回调类，用于记录训练过程中的详细参数"""
+    
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        """当有新的日志时调用"""
+        if logs is not None:
+            # 记录训练参数到日志文件
+            log_message = "训练参数更新: "
+            for key, value in logs.items():
+                if isinstance(value, float):
+                    log_message += f"{key}={value:.6f}, "
+                else:
+                    log_message += f"{key}={value}, "
+            logger.info(log_message.rstrip(", "))
+        # # 主动回收内存
+        # import gc
+        # gc.collect()
+        # if torch.cuda.is_available():
+        #     torch.cuda.empty_cache()
+    
+    def on_step_end(self, args, state, control, logs=None, **kwargs):
+        """每步结束时调用"""
+        if logs is not None and 'loss' in logs:
+            logger.info(f"步骤 {state.global_step}: loss={logs['loss']:.6f}")
+        # # 主动回收内存
+        # import gc
+        # gc.collect()
+        # if torch.cuda.is_available():
+        #     torch.cuda.empty_cache()
+    
+    def on_evaluate(self, args, state, control, metrics=None, **kwargs):
+        """评估时调用"""
+        if metrics is not None:
+            logger.info("验证集评估结果:")
+            for key, value in metrics.items():
+                if isinstance(value, float):
+                    logger.info(f"  {key}: {value:.6f}")
+                else:
+                    logger.info(f"  {key}: {value}")
+        # # 评估后主动回收内存
+        # import gc
+        # gc.collect()
+        # if torch.cuda.is_available():
+        #     torch.cuda.empty_cache()
+
 def main():
     all_start = time.time()
     
@@ -255,29 +362,45 @@ def main():
     # 确保CUDA正确初始化
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-        print(f"CUDA初始化完成，当前设备: {torch.cuda.current_device()}")
+        logger.info(f"CUDA初始化完成，当前设备: {torch.cuda.current_device()}")
     
     # 加载数据
-    print("加载数据...")
+    logger.info("加载数据...")
     with open(TRAIN_PATH, 'r', encoding='utf-8') as f:
         train = [json.loads(line) for line in f.readlines()]
         train_df = pd.DataFrame(train)
     
-    with open(TEST_PATH, 'r', encoding='utf-8') as f:
-        test = [json.loads(line) for line in f.readlines()]
-        test_df = pd.DataFrame(test)
+    # 数据集分割：避免数据泄露
+    logger.info("进行数据集分割...")
+    # 首先分割出测试集（10%）
+    train_val_df, test_df = train_test_split(
+        train_df, 
+        test_size=0.1, 
+        random_state=42, 
+        stratify=train_df['label'] if 'label' in train_df.columns else None
+    )
     
-    print(f"训练数据: {len(train_df)} 条")
-    print(f"测试数据: {len(test_df)} 条")
+    # 然后从剩余数据中分割出验证集（10%）
+    train_df, val_df = train_test_split(
+        train_val_df, 
+        test_size=0.1, 
+        random_state=42, 
+        stratify=train_val_df['label'] if 'label' in train_val_df.columns else None
+    )
+    
+    logger.info(f"数据集分割完成:")
+    logger.info(f"  训练集: {len(train_df)} 条 (80%)")
+    logger.info(f"  验证集: {len(val_df)} 条 (10%)")
+    logger.info(f"  测试集: {len(test_df)} 条 (10%)")
     
     # 检查是否已有训练好的模型
     if is_model_saved(OUTPUT_DIR):
-        print(f"检测到已保存的LoRA适配器，直接加载进行预测: {OUTPUT_DIR}")
+        logger.info(f"检测到已保存的LoRA适配器，直接加载进行预测: {OUTPUT_DIR}")
         
         # 验证LoRA适配器完整性
         try:
             # 加载基础模型
-            print(f"加载基础模型: {MODEL_NAME}")
+            logger.info(f"加载基础模型: {MODEL_NAME}")
             base_model = AutoModelForCausalLM.from_pretrained(
                 MODEL_NAME,
                 torch_dtype=torch.float16,
@@ -285,25 +408,25 @@ def main():
             )
             
             # 加载LoRA适配器
-            print(f"加载LoRA适配器: {OUTPUT_DIR}")
+            logger.info(f"加载LoRA适配器: {OUTPUT_DIR}")
             model = PeftModel.from_pretrained(base_model, OUTPUT_DIR)
-            print("✓ LoRA适配器加载成功")
+            logger.info("✓ LoRA适配器加载成功")
             
             # 清理测试加载的模型
             del base_model
             torch.cuda.empty_cache()
             
         except Exception as e:
-            print(f"LoRA适配器验证失败: {e}")
-            print("将重新训练模型...")
+            logger.error(f"LoRA适配器验证失败: {e}")
+            logger.info("将重新训练模型...")
             # 如果验证失败，删除不完整的适配器文件
             import shutil
             if os.path.exists(OUTPUT_DIR):
                 shutil.rmtree(OUTPUT_DIR)
-                print(f"已删除不完整的适配器目录: {OUTPUT_DIR}")
+                logger.info(f"已删除不完整的适配器目录: {OUTPUT_DIR}")
         
         # 使用已加载的模型进行预测
-        print("使用已加载的模型进行预测...")
+        logger.info("使用已加载的模型进行预测...")
         tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
         
         # 将模型移至GPU（如果可用）
@@ -311,27 +434,28 @@ def main():
         model = model.to(device)
         
         # 预测测试集
-        print("预测测试集...")
-        predictions = predict_test_data(model, tokenizer, test_df, batch_size=8)
+        logger.info("预测测试集...")
+        predictions = predict_test_data(model, tokenizer, test_df, batch_size=16)
         
         # 保存预测结果
-        print("保存预测结果...")
+        logger.info("保存预测结果...")
         with open(RESULT_PATH, "w") as file:
             for label in predictions:
                 file.write(str(label) + "\n")
         
-        print(f"预测结果已保存至 {RESULT_PATH}")
+        logger.info(f"预测结果已保存至 {RESULT_PATH}")
         return
     
     # 加载模型和分词器
-    print("加载模型和分词器...")
+    logger.info("加载模型和分词器...")
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
     
-    # 创建训练数据集
+    # 创建训练和验证数据集
     train_dataset = AIGCDetectionDataset(train_df, tokenizer)
+    val_dataset = AIGCDetectionDataset(val_df, tokenizer)
     
     # 加载基础模型
-    print("加载基础模型...")
+    logger.info("加载基础模型...")
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_NAME,
         torch_dtype=torch.float16,
@@ -346,11 +470,11 @@ def main():
     peft_config = LoraConfig(
         task_type=TaskType.CAUSAL_LM,
         inference_mode=False,
-        r=16,  # 增加rank
+        r=16,  # 增加rank  8->16
         lora_alpha=32,
         lora_dropout=0.1,
         target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],  # 扩展目标模块
-        bias="none",  # 不训练bias
+        bias="none",      # 不训练bias
         use_rslora=False,
     )
     
@@ -367,30 +491,43 @@ def main():
     training_args = TrainingArguments(
         output_dir=CHECKPOINT_DIR,
         num_train_epochs=1,
-        per_device_train_batch_size=4,
-        per_device_eval_batch_size=4,
-        gradient_accumulation_steps=16,  # 增加梯度累积步数
-        learning_rate=2e-5,
+        per_device_train_batch_size=1,
+        per_device_eval_batch_size=1,
+        gradient_accumulation_steps=4,  # 增加梯度累积步数
+        learning_rate=2e-5,  # 提高学习率 2e-5 -> 3e-4 -> 2e-5
         weight_decay=0.01,
         max_grad_norm=1.0,  # 添加梯度裁剪
-        warmup_steps=50,    # 引入学习率预热
+        warmup_steps=50,  # 减少预热步数 100->50 
         save_strategy="steps",
-        save_steps=500,     # 每500步保存一次
+        save_steps=200,     # 每200步保存一次
         save_total_limit=3, # 保留3个检查点
-        logging_steps=100,
+        logging_steps=50,
         remove_unused_columns=False,
         no_cuda=False,
         label_names=["labels"],
         # GPU加速设置
         fp16=True if torch.cuda.is_available() else False,
         tf32=True if torch.cuda.is_available() else False,
-        gradient_checkpointing=False,  # 暂时禁用梯度检查点
         optim="adamw_torch",
-        dataloader_pin_memory=False,  # 禁用pin_memory避免CUDA张量问题
-        dataloader_num_workers=4,        # 多进程数据加载
-        eval_accumulation_steps=2,   # 减少评估时的内存占用
+        # gradient_checkpointing=True,  # 启用梯度检查点节省显存
+        dataloader_pin_memory=True,  # 启用pin_memory
+        # dataloader_pin_memory=False,  # 禁用pin_memory避免CUDA张量问题
+        gradient_checkpointing=False,  # 暂时禁用梯度检查点
+        dataloader_num_workers=2,     # 启用多进程数据加载
+        #dataloader_prefetch_factor=2,  # 预取因子
         report_to=[],  # 禁用wandb等报告工具
         disable_tqdm=False,  # 启用进度条
+        # group_by_length=True,  # 按长度分组提高效率
+        # length_column_name="length",
+        # ignore_data_skip=False,
+        # dataloader_drop_last=True,  # 丢弃不完整的batch
+        # 添加验证相关设置
+        eval_strategy="steps",
+        eval_steps=200,  # 每200步评估一次
+        eval_accumulation_steps=8,   # 减少评估时的内存占用 2->8
+        load_best_model_at_end=True,  # 训练结束时加载最佳模型
+        metric_for_best_model="eval_loss",  # 以验证损失为最佳指标
+        greater_is_better=False,  # 损失越小越好
     )
     
     # 创建Trainer
@@ -405,31 +542,34 @@ def main():
         return batch
     
     # 检查设备设置
-    print(f"当前设备: {device}")
-    print(f"CUDA可用: {torch.cuda.is_available()}")
+    logger.info(f"当前设备: {device}")
+    logger.info(f"CUDA可用: {torch.cuda.is_available()}")
     if torch.cuda.is_available():
-        print(f"当前CUDA设备: {torch.cuda.current_device()}")
-        print(f"GPU名称: {torch.cuda.get_device_name()}")
+        logger.info(f"当前CUDA设备: {torch.cuda.current_device()}")
+        logger.info(f"GPU名称: {torch.cuda.get_device_name()}")
     
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
-        data_collator=collate_fn
+        eval_dataset=val_dataset,  # 添加验证集
+        data_collator=collate_fn,
+        compute_metrics=compute_metrics,  # 添加评估指标计算
+        callbacks=[TrainingLoggerCallback()],  # 添加自定义回调
     )
     
     # 调试信息：检查模型参数
-    print("\n=== 模型调试信息 ===")
-    print(f"模型设备: {next(model.parameters()).device}")
-    print(f"可训练参数数量: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
-    print(f"总参数数量: {sum(p.numel() for p in model.parameters())}")
+    logger.info("\n=== 模型调试信息 ===")
+    logger.info(f"模型设备: {next(model.parameters()).device}")
+    logger.info(f"可训练参数数量: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
+    logger.info(f"总参数数量: {sum(p.numel() for p in model.parameters())}")
     
     # 检查第一个样本
     sample = train_dataset[0]
-    print(f"样本键: {sample.keys()}")
-    print(f"input_ids形状: {sample['input_ids'].shape}")
-    print(f"labels形状: {sample['labels'].shape}")
-    print(f"labels中非-100的数量: {(sample['labels'] != -100).sum()}")
+    logger.info(f"样本键: {sample.keys()}")
+    logger.info(f"input_ids形状: {sample['input_ids'].shape}")
+    logger.info(f"labels形状: {sample['labels'].shape}")
+    logger.info(f"labels中非-100的数量: {(sample['labels'] != -100).sum()}")
     
     # 检查模型输出
     model.eval()
@@ -437,58 +577,90 @@ def main():
         # 将样本数据移到与模型相同的设备
         sample_input = {k: v.unsqueeze(0).to(device) for k, v in sample.items()}
         outputs = model(**sample_input)
-        print(f"模型输出logits形状: {outputs.logits.shape}")
+        logger.info(f"模型输出logits形状: {outputs.logits.shape}")
     
-    print("=== 调试信息结束 ===\n")
+    logger.info("=== 调试信息结束 ===\n")
     
     # 开始训练
-    print("开始训练模型...")
-    print(f"训练参数: batch_size={training_args.per_device_train_batch_size}, "
+    logger.info("开始训练模型...")
+    logger.info(f"训练参数: batch_size={training_args.per_device_train_batch_size}, "
           f"gradient_accumulation_steps={training_args.gradient_accumulation_steps}, "
           f"effective_batch_size={training_args.per_device_train_batch_size * training_args.gradient_accumulation_steps}")
     
     try:
         trainer.train()
-        print("训练完成！")
+        logger.info("训练完成！")
     except KeyboardInterrupt:
-        print("训练被中断，保存当前检查点...")
+        logger.info("训练被中断，正在清理资源...")
+        cleanup_memory()
         trainer.save_model(os.path.join(CHECKPOINT_DIR, "interrupted"))
-        print("检查点已保存，可以稍后继续训练")
+        logger.info("检查点已保存，可以稍后继续训练")
+        safe_trainer_cleanup(trainer)
+        # 新增：尝试终止所有子进程，防止多进程残留
+        import multiprocessing
+        try:
+            multiprocessing.active_children()
+            for p in multiprocessing.active_children():
+                logger.info(f"终止子进程: {p.pid}")
+                p.terminate()
+        except Exception as e:
+            logger.error(f"终止子进程时出错: {e}")
         return
     except Exception as e:
-        print(f"训练过程中出现错误: {e}")
-        print("保存当前检查点...")
+        logger.error(f"训练过程中出现错误: {e}")
+        logger.info("正在清理资源...")
+        cleanup_memory()
         trainer.save_model(os.path.join(CHECKPOINT_DIR, "error"))
+        safe_trainer_cleanup(trainer)
+        # 新增：尝试终止所有子进程，防止多进程残留
+        import multiprocessing
+        try:
+            multiprocessing.active_children()
+            for p in multiprocessing.active_children():
+                logger.info(f"终止子进程: {p.pid}")
+                p.terminate()
+        except Exception as e:
+            logger.error(f"终止子进程时出错: {e}")
         return
     
     # 保存最终模型
-    print("保存最终模型...")
+    logger.info("保存最终模型...")
     trainer.save_model(OUTPUT_DIR)
     
     # 清理内存
-    del trainer
+    logger.info("清理训练资源...")
+    safe_trainer_cleanup(trainer)
     torch.cuda.empty_cache()
     gc.collect()
-    
+    # 新增：训练结束后尝试终止所有子进程
+    import multiprocessing
+    try:
+        multiprocessing.active_children()
+        for p in multiprocessing.active_children():
+            logger.info(f"终止子进程: {p.pid}")
+            p.terminate()
+    except Exception as e:
+        logger.error(f"终止子进程时出错: {e}")
+
     # 使用已加载的模型进行预测
-    print("使用已加载的模型进行预测...")
+    logger.info("使用已加载的模型进行预测...")
     # 模型已经在前面加载过了，直接使用
     model = model.to(device)  # 确保模型在正确的设备上
     
     # 预测测试集
-    print("预测测试集...")
-    predictions = predict_test_data(model, tokenizer, test_df, batch_size=8)
+    logger.info("预测测试集...")
+    predictions = predict_test_data(model, tokenizer, test_df, batch_size=16)
     
     # 保存预测结果
-    print("保存预测结果...")
+    logger.info("保存预测结果...")
     with open(RESULT_PATH, "w") as file:
         for label in predictions:
             file.write(str(label) + "\n")
     
-    print(f"预测结果已保存至 {RESULT_PATH}")
+    logger.info(f"预测结果已保存至 {RESULT_PATH}")
     
     all_end = time.time()
-    print(f"\n全部流程总用时: {all_end - all_start:.2f} 秒")
+    logger.info(f"\n全部流程总用时: {all_end - all_start:.2f} 秒")
 
 if __name__ == "__main__":
     main()

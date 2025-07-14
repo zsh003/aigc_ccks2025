@@ -15,4 +15,7 @@ models/
 fine_tuned_model/
 *.zip
 *.rar
+*.7z
 checkpoints/
+fine_tuned_model*/
+checkpoints*/
