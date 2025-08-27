@@ -1,0 +1,105 @@
+RTX5090 32GB显存
+v11 
+per_device_train_batch_size=1,
+per_device_eval_batch_size=1,
+gradient_accumulation_steps=32,
+内存 稳定8.32GB 预测时稳定13.64GB
+CPU使用率 稳定102%
+显存 稳定13381MB 预测时稳定19168MB
+GPU使用率 浮动30%-50% 预测时稳定43%
+1个多小时
+
+v12
+per_device_train_batch_size=2,
+per_device_eval_batch_size=2,
+gradient_accumulation_steps=32,
+内存 稳定15.66GB
+CPU使用率 浮动102%-150%
+显存 稳定14677MB 
+GPU使用率 浮动50%-70%
+40分钟
+
+v13
+per_device_train_batch_size=2,
+per_device_eval_batch_size=2,
+gradient_accumulation_steps=64,
+内存 稳定14.54GB
+CPU使用率 稳定102% 有150%飙升
+显存 稳定14677MB 
+GPU使用率 浮动50%-70%
+9%|8         | 19/218 [03:42<38:55, 11.74s/it] 40分钟不变
+
+v13
+per_device_train_batch_size=4,
+per_device_eval_batch_size=4,
+gradient_accumulation_steps=32,
+内存 稳定14.54GB
+CPU使用率 稳定102% 有150%飙升
+显存 稳定20051MB 
+GPU使用率 浮动80%-95%
+11%|#1        | 25/218 [02:59<19:11,  5.97s/it] 20分钟
+
+v14
+per_device_train_batch_size=8,
+per_device_eval_batch_size=8,
+gradient_accumulation_steps=32,
+训练过程中出现错误: CUDA out of memory. Tried to allocate 96.00 MiB. GPU 0 has a total capacity of 31.37 GiB of which 93.75 MiB is free. Including non-PyTorch memory, this process has 31.27 GiB memory in use. Of the allocated memory 30.64 GiB is allocated by PyTorch, and 32.41 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+
+per_device_train_batch_size=6,
+per_device_eval_batch_size=6,
+gradient_accumulation_steps=32,
+
+训练过程中出现错误: CUDA out of memory. Tried to allocate 72.00 MiB. GPU 0 has a total capacity of 31.37 GiB of which 37.75 MiB is free. Including non-PyTorch memory, this process has 31.32 GiB memory in use. Of the allocated memory 30.67 GiB is allocated by PyTorch, and 66.72 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+
+per_device_train_batch_size=4,
+per_device_eval_batch_size=4,
+gradient_accumulation_steps=32,
+内存 稳定6.76GB 预测稳定3.44GB
+CPU使用率 稳定102% 有150%飙升 预测不变
+显存 稳定31755MB (31.01GB) 预测稳定16965MB
+GPU使用率 浮动85%-97% 预测稳定 52-54%
+如果训练完没清理就预测，会有CPU到536%的飙升 导致溢出
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 96.00 MiB. GPU 0 has a total capacity of 31.37 GiB of which 16.44 MiB is free. Process 5067 has 18.81 GiB memory in use. Including non-PyTorch memory, this process has 12.53 GiB memory in use. Of the allocated memory 12.03 GiB is allocated by PyTorch, and 18.03 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+
+
+v15
+per_device_train_batch_size=4,
+per_device_eval_batch_size=8,
+gradient_accumulation_steps=32,
+内存 稳定6.75GB 预测稳定3.44GB
+CPU使用率 稳定102% 有150%飙升 预测不变
+显存 稳定31757MB (31.01GB) 预测稳定16965MB
+GPU使用率 浮动85%-97% 预测稳定 52-54%
+100步预测时内存飙到11G爆了
+
+==== 日志开始 2025-07-21 17:24:44.198082 ====
+{'loss': 13.6031, 'grad_norm': 49.42969512939453, 'learning_rate': 4.800000000000001e-06, 'epoch': 0.06}
+{'loss': 2.0119, 'grad_norm': 34.52080535888672, 'learning_rate': 9.800000000000001e-06, 'epoch': 0.13}
+{'loss': 0.0942, 'grad_norm': 4.40060567855835, 'learning_rate': 1.48e-05, 'epoch': 0.19}
+{'loss': 0.0397, 'grad_norm': 7.458755970001221, 'learning_rate': 1.98e-05, 'epoch': 0.25}
+  8%|8         | 100/1179 [08:20<1:24:36,  4.70s/it]
+训练过程中出现错误: CUDA out of memory. Tried to allocate 5.80 GiB. GPU 0 has a total capacity of 31.37 GiB of which 4.43 GiB is free. Including non-PyTorch memory, this process has 26.93 GiB memory in use. Of the allocated memory 23.16 GiB is allocated by PyTorch, and 3.17 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+
+per_device_train_batch_size=4,
+per_device_eval_batch_size=2,
+gradient_accumulation_steps=16,
+ 训练过程中出现错误: Unsupported type for concatenation: got <class 'numpy.ndarray'>00 [00:02<03:25,  6.73it/s]
+训练过程中出现错误: Unsupported type for concatenation: got <class 'numpy.ndarray'>00 [00:02<03:25,  6.73it/s]
+
+v16
+per_device_train_batch_size=2,
+per_device_eval_batch_size=2,
+gradient_accumulation_steps=32,
+内存 稳定23.04GB 预测稳定20.36GB
+CPU使用率 稳定102% 有130%飙升 预测不变
+显存 稳定28457MB  预测稳定17621MB
+GPU使用率 浮动85%-97% 预测稳定 55-60%
+
+v17
+per_device_train_batch_size=3,
+per_device_eval_batch_size=3,
+gradient_accumulation_steps=32,
+内存 稳定24.42GB 预测稳定20.40GB
+CPU使用率 稳定102% 有146%飙升 预测不变
+显存 稳定31495MB  预测稳定17629MB
+GPU使用率 浮动85%-97% 预测稳定 55-60%

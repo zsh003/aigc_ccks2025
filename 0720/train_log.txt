@@ -1,0 +1,205 @@
+root@autodl-container-b6b911a200-68431ff3:/aigc_ccks2025/codes# python 0720/Qwen3-0.6B-lora-fv_v9.py 
+GPU可用: Tesla V100-PCIE-32GB
+GPU显存: 31.7 GB
+当前显存使用: 0.0 GB
+✓ 支持BF16精度
+CUDA初始化完成，当前设备: 0
+加载数据...
+训练数据路径: ../datasets/train/train.jsonl
+测试数据路径: ../datasets/test_717/test.jsonl
+成功加载训练数据: 28000 条
+成功加载测试数据: 2800 条
+训练数据: 28000 条
+测试数据: 2800 条
+验证数据格式...
+数据样本检查:
+训练数据列: ['text', 'label']
+测试数据列: ['text']
+训练数据前3行:
+  第1行: {'text': ' S. cities. Here\'s more about Seattle\'s snowfall characteristics: Typical Snowfall - Seattle averages about 5-7 inches of snowfall annually - Snow typically falls on just 3-5 days per year - Most snowfall occurs between December and February Why Heavy Snow Is Rare - The moderating influence of the Pacific Ocean keeps temperatures relatively mild - The Puget Sound area\'s low elevation means precipitation often falls as rain instead of snow - The Olympic Mountains create a partial rain shadow effect for Seattle Notable Snow Events - The occasional "convergence zone" storms can create localized heavier snowfall - Major snow events like the December 2008 storm (which dropped over 20 inches) occur roughly once every decade - When significant snow does fall, the city\'s hilly terrain can create challenging conditions Seattle\'s infrastructure isn\'t built for heavy snow, so even moderate snowfall can significantly impact transportation and daily activities throughout the region.', 'label': 1}
+  第2行: {'text': " This paper delves into the interpretability and evaluation of graph representation learning methods, addressing the critical need to understand and assess these models' inner workings and performance. We explore the landscape of interpretability in graph-based models, proposing novel metrics and methodologies to elucidate how these representations capture and encode graph topology and node attributes. Furthermore, we evaluate existing graph representation learning techniques using both qualitative and quantitative benchmarks, highlighting their strengths and limitations in diverse application scenarios.", 'label': 1}
+  第3行: {'text': " You could sell this toy to all your friends at school, or you could only sell it to a select group of friends who really, really like your toys. 1. Exclusive Friends : If you only sell your toy to a few friends, those friends might really love your toy because it's special. They'll tell all their friends how cool it is, and those friends might want to buy one too.", 'label': 1}
+测试数据前3行:
+  第1行: {'text': 'The black ferns steadily racked up their score with Kelly Brazier kicking two penalty goals and teammate Lydia Crossman adding another try, effectively turning the tables on England. However, England refused to back down. Coming back from the halftime break, the red roses put on an impressive display of determination.'}
+  第2行: {'text': "Set two years later on from This is England'86, the twohour drama will deal with the aftermath of the events in that fourpart series. Just when I think my love affair with This is England is over, it pulls me back in, Meadows said."}
+  第3行: {'text': "Good films cannot solely be based on a beautiful garden and a hill top. Surprised to see it has won two awards. Extremely overrated. I first saw that kind of films from China, visually stunning BUT also with really something captivating to say, well, more than 10 years ago and I'm sure there are still more coming up."}
+训练集: 26600 条，验证集: 1400 条
+目录为空: 0720/fine_tuned_model_0.6B_lora-fv_v9
+加载模型和分词器...
+加载基础模型...
+使用BF16精度加载模型...
+✓ 模型加载成功
+✓ LoRA模型加载成功
+trainable params: 20,185,088 || all params: 616,235,008 || trainable%: 3.2756
+Detected kernel version 5.4.0, which is below the recommended minimum of 5.5.0; this can cause the process to hang. It is recommended to upgrade the kernel to the minimum version or higher.
+
+=== 模型调试信息 ===
+模型设备: cuda:0
+可训练参数数量: 20185088
+总参数数量: 616235008
+样本键: dict_keys(['input_ids', 'attention_mask', 'labels'])
+input_ids形状: torch.Size([256])
+labels形状: torch.Size([256])
+labels中非-100的数量: 3
+模型输出logits形状: torch.Size([1, 256, 151936])
+=== 调试信息结束 ===
+
+开始训练模型...
+训练参数: batch_size=4, gradient_accumulation_steps=8, effective_batch_size=32
+{'loss': 9.3268, 'grad_norm': 18.0151309967041, 'learning_rate': 9.800000000000001e-06, 'epoch': 0.06}        
+{'loss': 0.1698, 'grad_norm': 1.6803498268127441, 'learning_rate': 1.98e-05, 'epoch': 0.12}                   
+{'loss': 0.1198, 'grad_norm': 5.129672527313232, 'learning_rate': 1.86593707250342e-05, 'epoch': 0.18}        
+{'loss': 0.0547, 'grad_norm': 4.764864921569824, 'learning_rate': 1.729138166894665e-05, 'epoch': 0.24}       
+ 24%|████████████████▌                                                    | 200/831 [25:36<1:19:17,  7.54s/it]训练过程中出现错误: Unsupported type for concatenation: got <class 'numpy.ndarray'>50 [00:26<03:37,  1.46it/s]
+正在清理资源...
+执行内存清理...
+内存清理完成
+Trainer对象已安全清理
+终止子进程: 2657
+终止子进程: 2576
+终止子进程: 2724
+终止子进程: 2591
+ 24%|████████████████▌                                                    | 200/831 [26:35<1:23:53,  7.98s/it
+
+
+
+
+
+
+
+root@autodl-container-b6b911a200-68431ff3:/aigc_ccks2025/codes# python 0720/Qwen3-0.6B-lora-fv_v9.py 
+GPU可用: Tesla V100-PCIE-32GB
+GPU显存: 31.7 GB
+当前显存使用: 0.0 GB
+✓ 支持BF16精度
+CUDA初始化完成，当前设备: 0
+加载数据...
+训练数据路径: ../datasets/train/train.jsonl
+测试数据路径: ../datasets/test_717/test.jsonl
+成功加载训练数据: 28000 条
+成功加载测试数据: 2800 条
+训练数据: 28000 条
+测试数据: 2800 条
+验证数据格式...
+数据样本检查:
+训练数据列: ['text', 'label']
+测试数据列: ['text']
+训练数据前3行:
+  第1行: {'text': ' S. cities. Here\'s more about Seattle\'s snowfall characteristics: Typical Snowfall - Seattle averages about 5-7 inches of snowfall annually - Snow typically falls on just 3-5 days per year - Most snowfall occurs between December and February Why Heavy Snow Is Rare - The moderating influence of the Pacific Ocean keeps temperatures relatively mild - The Puget Sound area\'s low elevation means precipitation often falls as rain instead of snow - The Olympic Mountains create a partial rain shadow effect for Seattle Notable Snow Events - The occasional "convergence zone" storms can create localized heavier snowfall - Major snow events like the December 2008 storm (which dropped over 20 inches) occur roughly once every decade - When significant snow does fall, the city\'s hilly terrain can create challenging conditions Seattle\'s infrastructure isn\'t built for heavy snow, so even moderate snowfall can significantly impact transportation and daily activities throughout the region.', 'label': 1}
+  第2行: {'text': " This paper delves into the interpretability and evaluation of graph representation learning methods, addressing the critical need to understand and assess these models' inner workings and performance. We explore the landscape of interpretability in graph-based models, proposing novel metrics and methodologies to elucidate how these representations capture and encode graph topology and node attributes. Furthermore, we evaluate existing graph representation learning techniques using both qualitative and quantitative benchmarks, highlighting their strengths and limitations in diverse application scenarios.", 'label': 1}
+  第3行: {'text': " You could sell this toy to all your friends at school, or you could only sell it to a select group of friends who really, really like your toys. 1. Exclusive Friends : If you only sell your toy to a few friends, those friends might really love your toy because it's special. They'll tell all their friends how cool it is, and those friends might want to buy one too.", 'label': 1}
+测试数据前3行:
+  第1行: {'text': 'The black ferns steadily racked up their score with Kelly Brazier kicking two penalty goals and teammate Lydia Crossman adding another try, effectively turning the tables on England. However, England refused to back down. Coming back from the halftime break, the red roses put on an impressive display of determination.'}
+  第2行: {'text': "Set two years later on from This is England'86, the twohour drama will deal with the aftermath of the events in that fourpart series. Just when I think my love affair with This is England is over, it pulls me back in, Meadows said."}
+  第3行: {'text': "Good films cannot solely be based on a beautiful garden and a hill top. Surprised to see it has won two awards. Extremely overrated. I first saw that kind of films from China, visually stunning BUT also with really something captivating to say, well, more than 10 years ago and I'm sure there are still more coming up."}
+训练集: 26600 条，验证集: 1400 条
+目录为空: 0720/fine_tuned_model_0.6B_lora-fv_v9
+加载模型和分词器...
+加载基础模型...
+使用BF16精度加载模型...
+✓ 模型加载成功
+✓ LoRA模型加载成功
+trainable params: 20,185,088 || all params: 616,235,008 || trainable%: 3.2756
+Detected kernel version 5.4.0, which is below the recommended minimum of 5.5.0; this can cause the process to hang. It is recommended to upgrade the kernel to the minimum version or higher.
+
+=== 模型调试信息 ===
+模型设备: cuda:0
+可训练参数数量: 20185088
+总参数数量: 616235008
+样本键: dict_keys(['input_ids', 'attention_mask', 'labels'])
+input_ids形状: torch.Size([256])
+labels形状: torch.Size([256])
+labels中非-100的数量: 3
+模型输出logits形状: torch.Size([1, 256, 151936])
+=== 调试信息结束 ===
+
+开始训练模型...
+训练参数: batch_size=4, gradient_accumulation_steps=8, effective_batch_size=32
+{'loss': 9.3268, 'grad_norm': 18.0151309967041, 'learning_rate': 9.800000000000001e-06, 'epoch': 0.06}        
+{'loss': 0.1698, 'grad_norm': 1.6803498268127441, 'learning_rate': 1.98e-05, 'epoch': 0.12}                   
+{'loss': 0.1198, 'grad_norm': 5.129672527313232, 'learning_rate': 1.86593707250342e-05, 'epoch': 0.18}        
+{'loss': 0.0547, 'grad_norm': 4.764864921569824, 'learning_rate': 1.729138166894665e-05, 'epoch': 0.24}       
+ 24%|████████████████▌                                                    | 200/831 [25:36<1:19:17,  7.54s/it]训练过程中出现错误: Unsupported type for concatenation: got <class 'numpy.ndarray'>50 [00:26<03:37,  1.46it/s]
+正在清理资源...
+执行内存清理...
+内存清理完成
+Trainer对象已安全清理
+终止子进程: 2657
+终止子进程: 2576
+终止子进程: 2724
+终止子进程: 2591
+ 24%|████████████████▌                                                    | 200/831 [26:35<1:23:53,  7.98s/it]
+                                                                                                             root@autodl-container-b6b911a200-68431ff3:/aigc_ccks2025/codes# python 0720/Qwen3-0.6B-lora-fv_v10.py           
+GPU可用: Tesla V100-PCIE-32GB
+GPU显存: 31.7 GB
+当前显存使用: 0.0 GB
+✓ 支持BF16精度
+CUDA初始化完成，当前设备: 0
+加载数据...
+训练数据: 28000 条
+测试数据: 2800 条
+训练集: 26600 条，验证集: 1400 条
+目录为空: 0720/fine_tuned_model_0.6B_lora-fv_v10
+加载模型和分词器...
+加载基础模型...
+使用BF16精度加载模型...
+✓ 模型加载成功
+✓ LoRA模型加载成功
+trainable params: 20,185,088 || all params: 616,235,008 || trainable%: 3.2756
+Detected kernel version 5.4.0, which is below the recommended minimum of 5.5.0; this can cause the process to hang. It is recommended to upgrade the kernel to the minimum version or higher.
+
+=== 模型调试信息 ===
+模型设备: cuda:0
+可训练参数数量: 20185088
+总参数数量: 616235008
+样本键: dict_keys(['input_ids', 'attention_mask', 'labels'])
+input_ids形状: torch.Size([256])
+labels形状: torch.Size([256])
+labels中非-100的数量: 3
+模型输出logits形状: torch.Size([1, 256, 151936])
+=== 调试信息结束 ===
+
+开始训练模型...
+训练参数: batch_size=4, gradient_accumulation_steps=8, effective_batch_size=32
+{'loss': 9.3556, 'grad_norm': 16.326271057128906, 'learning_rate': 9.800000000000001e-06, 'epoch': 0.06}      
+{'loss': 0.1849, 'grad_norm': 19.979732513427734, 'learning_rate': 1.98e-05, 'epoch': 0.12}                   
+{'loss': 0.0929, 'grad_norm': 1.3350516557693481, 'learning_rate': 1.86593707250342e-05, 'epoch': 0.18}       
+{'loss': 0.0906, 'grad_norm': 6.497775077819824, 'learning_rate': 1.729138166894665e-05, 'epoch': 0.24}       
+{'loss': 0.023, 'grad_norm': 3.8587749004364014, 'learning_rate': 1.59233926128591e-05, 'epoch': 0.3}         
+{'loss': 0.0316, 'grad_norm': 1.9993993043899536, 'learning_rate': 1.4555403556771547e-05, 'epoch': 0.36}     
+{'loss': 0.0271, 'grad_norm': 2.4013218879699707, 'learning_rate': 1.3187414500683994e-05, 'epoch': 0.42}     
+{'loss': 0.0136, 'grad_norm': 9.939007759094238, 'learning_rate': 1.1819425444596444e-05, 'epoch': 0.48}      
+{'loss': 0.0174, 'grad_norm': 5.651605606079102, 'learning_rate': 1.0451436388508893e-05, 'epoch': 0.54}      
+{'loss': 0.0118, 'grad_norm': 0.3490213453769684, 'learning_rate': 9.083447332421342e-06, 'epoch': 0.6}       
+{'loss': 0.0095, 'grad_norm': 0.01827271468937397, 'learning_rate': 7.71545827633379e-06, 'epoch': 0.66}      
+{'loss': 0.006, 'grad_norm': 4.98084020614624, 'learning_rate': 6.347469220246239e-06, 'epoch': 0.72}         
+{'loss': 0.0095, 'grad_norm': 0.00803549773991108, 'learning_rate': 4.979480164158687e-06, 'epoch': 0.78}     
+{'loss': 0.0103, 'grad_norm': 5.161425590515137, 'learning_rate': 3.6114911080711355e-06, 'epoch': 0.84}      
+{'loss': 0.0072, 'grad_norm': 4.560810565948486, 'learning_rate': 2.243502051983584e-06, 'epoch': 0.9}        
+{'loss': 0.0079, 'grad_norm': 0.005059433169662952, 'learning_rate': 8.755129958960329e-07, 'epoch': 0.96}    
+{'train_runtime': 4048.2454, 'train_samples_per_second': 6.571, 'train_steps_per_second': 0.205, 'train_loss': 0.5957994285509187, 'epoch': 1.0}
+100%|█████████████████████████████████████████████████████████████████████| 831/831 [1:07:28<00:00,  4.87s/it]
+训练完成！
+保存最终LoRA适配器...
+清理训练资源...
+Trainer对象已安全清理
+
+===== 多进程批量预测 =====
+使用BF16精度加载模型: 0720-lora-v10
+Batch预测进度:   0%|                                                                   | 0/44 [00:00<?, ?it/s/root/miniconda3/lib/python3.12/site-packages/transformers/generation/configuration_utils.py:631: UserWarning: `do_sample` is set to `False`. However, `temperature` is set to `0.6` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `temperature`.
+  warnings.warn(
+/root/miniconda3/lib/python3.12/site-packages/transformers/generation/configuration_utils.py:636: UserWarning: `do_sample` is set to `False`. However, `top_p` is set to `0.95` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `top_p`.
+  warnings.warn(
+/root/miniconda3/lib/python3.12/site-packages/transformers/generation/configuration_utils.py:653: UserWarning: `do_sample` is set to `False`. However, `top_k` is set to `20` -- this flag is only used in sample-based generation modes. You should set `do_sample=True` or unset `top_k`.
+  warnings.warn(
+Batch预测进度: 100%|██████████████████████████████████████████████████████████| 44/44 [12:56<00:00, 17.65s/it]
+0720-lora-v10 完成，AI生成=2281, 人类撰写=519                                                                 
+全部模型预测完成！
+
+=== 各模型预测分布 ===
+0720-lora-v10: AI生成=2281, 人类撰写=519
+
+所有模型预测完全一致的样本数: 2800 / 2800
+全部流程结束！
+
+全部流程总用时: 4886.27 秒

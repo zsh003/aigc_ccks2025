@@ -1,0 +1,17 @@
+{
+  "experiment_id": "55e2e0f8-68dd-40cd-b93a-bf455510da8a",
+  "timestamp": "2025-07-21 22:57:51",
+  "parameters": {
+    "lora_r": 128,
+    "lora_alpha": 256,
+    "learning_rate": 2e-05,
+    "batch_size": 2,
+    "gradient_accumulation_steps": 32,
+    "num_train_epochs": 1,
+    "train_data_size": 28000
+  },
+  "metrics": {
+    "train_loss": 0.5339348055166565,
+    "train_runtime": 2683.2923
+  }
+}
